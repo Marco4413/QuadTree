@@ -241,7 +241,7 @@ export class QuadTree {
         if (this.IsSplit()) {
             for (let i = 0; i < this._children.length; i++)
                 this._children[i].AddElement(element);
-        } else if ((this._maxDepth < 0 || this._depth < this._maxDepth) && this._elements.length >= this._maxElements) {
+        } else if ((this._maxDepth < 0 || this._depth < this._maxDepth) && this._elements.length > this._maxElements) {
             const halfWidth = this._width / 2;
             const halfHeight = this._height / 2;
             this._children = [
