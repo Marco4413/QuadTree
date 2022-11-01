@@ -1,0 +1,3 @@
+[submodule "examples/libs/wCanvas"]
+	path = examples/libs/wCanvas
+	url = https://github.com/Marco4413/wCanvas
