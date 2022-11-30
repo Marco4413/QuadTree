@@ -205,7 +205,7 @@ export class QuadTree {
 
     GetMaxElements() { return this._maxElements; }
 
-    IsRoot() { return this._root != null; }
+    IsRoot() { return this._root == null; }
     GetRoot() { return this._root; }
 
     GetDepth() { return this._depth; }
