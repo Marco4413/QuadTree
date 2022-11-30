@@ -46,8 +46,6 @@ export class AbstractTreeElement {
     constructor(data, type = TreeElementType.Unknown) {
         /** @type {Number} This element's id generated using {@link GenerateID}. */
         this.id = GenerateID();
-        /** @type {QuadTree} The last {@link QuadTree} that claimed this element. */
-        this.parent = null;
         /** @type {Object} Generic element data. */
         this.data = data;
         /** @type {TreeElementType} The type of the element. Useful to quickly check the bounding shape of the element. */
@@ -149,6 +147,8 @@ export class QuadTree {
         this._maxElements = maxElements;
         /** @type {AbstractTreeElement[]} */
         this._elements = [ ];
+        /** @type {Record<Number, QuadTree[]>} */
+        this._elementsParents = null;
         /** @type {QuadTree[]} */
         this._children = [ ];
         /** @type {QuadTree?} */
@@ -159,6 +159,7 @@ export class QuadTree {
         this._maxDepth = maxDepth;
 
         if (parent == null) {
+            this._elementsParents = { };
             for (let i = 0; i < initialElements.length; i++)
                 this.AddElement(initialElements[i]);
             return;
@@ -229,6 +230,25 @@ export class QuadTree {
         return null;
     }
 
+    _GetParentsForElement(element, create = false) {
+        const rootTree = this._root ?? this; // If no root is set then this Tree is the root
+        if (create && rootTree._elementsParents[element.id] == null)
+            rootTree._elementsParents[element.id] = [ ];
+        return rootTree._elementsParents[element.id] ?? null;
+    }
+
+    _RemoveParentsForElement(element) {
+        const rootTree = this._root ?? this;
+        rootTree._elementsParents[element.id] = undefined;
+    }
+
+    /**
+     * @param {AbstractTreeElement} element
+     * @returns {QuadTree[]?}
+     */
+    GetParentsForElement(element) {
+        const parents = this._GetParentsForElement(element, false);
+        return parents?.slice();
     }
 
     /**
@@ -236,25 +256,69 @@ export class QuadTree {
      * @returns {Boolean}
      */
     AddElement(element) {
-        if (!element.IsInsideRect(this._x, this._y, this._width, this._height)) return false;
-        element.parent = this;
+        const elParents = this._GetParentsForElement(element, true);
+        const initialParentCount = elParents.length;
 
-        this._elements.push(element);
-        if (this.IsSplit()) {
-            for (let i = 0; i < this._children.length; i++)
-                this._children[i].AddElement(element);
-        } else if ((this._maxDepth < 0 || this._depth < this._maxDepth) && this._elements.length > this._maxElements) {
-            const halfWidth = this._width / 2;
-            const halfHeight = this._height / 2;
-            this._children = [
-                new QuadTree(this._x, this._y, halfWidth, halfHeight, this._maxElements, this._maxDepth, undefined, this),
-                new QuadTree(this._x + halfWidth, this._y, halfWidth, halfHeight, this._maxElements, this._maxDepth, undefined, this),
-                new QuadTree(this._x, this._y + halfHeight, halfWidth, halfHeight, this._maxElements, this._maxDepth, undefined, this),
-                new QuadTree(this._x + halfWidth, this._y + halfHeight, halfWidth, halfHeight, this._maxElements, this._maxDepth, undefined, this)
-            ];
+        /** @type {QuadTree[]} */
+        const treePool = [ this ];
+        while (treePool.length > 0) {
+            const tree = treePool.pop();
+            if (!element.IsInsideRect(tree._x, tree._y, tree._width, tree._height)) continue;
+            elParents.push(tree);
+            tree._elements.push(element);
+    
+            if (tree.IsSplit()) {
+                treePool.push(...tree._children);
+            } else if ((tree._maxDepth < 0 || tree._depth < tree._maxDepth) && tree._elements.length > tree._maxElements) {
+                const halfWidth = tree._width / 2;
+                const halfHeight = tree._height / 2;
+                tree._children = [
+                    new QuadTree(tree._x, tree._y, halfWidth, halfHeight, tree._maxElements, tree._maxDepth, undefined, tree),
+                    new QuadTree(tree._x + halfWidth, tree._y, halfWidth, halfHeight, tree._maxElements, tree._maxDepth, undefined, tree),
+                    new QuadTree(tree._x, tree._y + halfHeight, halfWidth, halfHeight, tree._maxElements, tree._maxDepth, undefined, tree),
+                    new QuadTree(tree._x + halfWidth, tree._y + halfHeight, halfWidth, halfHeight, tree._maxElements, tree._maxDepth, undefined, tree)
+                ];
+            }
         }
 
+        return elParents.length > initialParentCount;
+    }
+
+    /**
+     * @param {AbstractTreeElement} element
+     * @returns {Boolean}
+    */
+    RemoveElement(element) {
+        if (!this.HasElement(element)) return false;
+        
+        const elParents = this._GetParentsForElement(element, false);
+        while (elParents.length > 0) {
+            const tree = elParents.pop();
+            const elIdx = tree._elements.indexOf(element);
+            tree._elements.splice(elIdx, 1);
+        }
+
+        this._RemoveParentsForElement(element);
         return true;
+    }
+
+    /**
+     * @param {AbstractTreeElement} element
+     * @returns {Boolean}
+     */
+    UpdateElement(element) {
+        if (this.RemoveElement(element))
+            return this.AddElement(element);
+        return false;
+    }
+
+    /**
+     * @param {AbstractTreeElement} element
+     * @returns {Boolean}
+     */
+    HasElement(element) {
+        const parents = this._GetParentsForElement(element);
+        return parents != null && parents.indexOf(this) >= 0;
     }
 
     GetElements() { return this._elements.slice(); }
