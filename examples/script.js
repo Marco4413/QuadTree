@@ -1,5 +1,6 @@
 import { wCanvas, Color } from "./libs/wCanvas/wcanvas.js";
 import { PointTreeElement, CircleTreeElement, QuadTree, RectTreeElement, TreeElementType } from "../QuadTree.js";
+import * as QTreeLib from "../QuadTree.js"; // This is assigned to the window for debugging
 
 /** @type {QuadTree?} */
 let _Tree = null;
@@ -10,6 +11,8 @@ let _ElementType = 1;
 let _WorldOriginX = 0;
 let _WorldOriginY = 0;
 let _WorldScale = 1;
+
+const _MovingCircle = new CircleTreeElement({ "angle": 0, "posX": 0 }, 0, 0, 25);
 
 const _SELECTED_TREE_COLOR = new Color("#ff0000");
 const _SELECTED_ELEMENT_COLOR = new Color("#00ff00");
@@ -35,22 +38,35 @@ const _DrawElement = (canvas, el) => {
     case TreeElementType.Rect:
         canvas.rect(el.x, el.y, el.w, el.h, { "noStroke": true });
         break;
-    default:
-        const fontSize = Math.min(Math.min(el.parent._width, el.parent._height) * _FONT_SCALE, _MAX_FONT_SIZE);
+    default: {
+        const parents = _Tree.GetParentsForElement(el);
+        const lastParent = parents[parents.length-1];
+        const fontSize = Math.min(Math.min(lastParent._width, lastParent._height) * _FONT_SCALE, _MAX_FONT_SIZE);
         canvas.textSize(fontSize);
         canvas.text("" + el.id, el.x, el.y, { "alignment": { "horizontal": "center", "vertical": "center" }, "noStroke": true });
     }
+    }
+};
+
+/** @param {Number} dt */
+const _Update = (dt) => {
+    _MovingCircle.data.posX = (_MovingCircle.data.posX + dt * 200) % _Tree._width;
+    _MovingCircle.data.angle += dt;
+    _MovingCircle.x = _Tree._x + _MovingCircle.data.posX;
+    _MovingCircle.y = Math.sin(_MovingCircle.data.angle) * 200;
+    _MovingCircle.r = 10 + Math.abs(Math.cos(_MovingCircle.data.angle)) * 15;
+    _Tree.UpdateElement(_MovingCircle);
 };
 
 /** @param {wCanvas} canvas */
-const _Draw = (canvas) => {
+const _Draw = (canvas, dt) => {
+    _Update(dt);
+
     canvas.background(85, 85, 85);
 
+    canvas.save();
     canvas.translate(-_WorldOriginX, -_WorldOriginY);
     canvas.scale(_WorldScale);
-
-    canvas.textSize(_MAX_FONT_SIZE);
-    canvas.text(`${_Tree._elements.length} Elements`, _Tree._x + 5, _Tree._y + 5, { "alignment": { "vertical": "top" } });
 
     const trees = [ _Tree ];
     while (trees.length > 0) {
@@ -71,7 +87,8 @@ const _Draw = (canvas) => {
         canvas.restore();
     }
 
-    const elements = _Tree._elements;
+    // const elements = _Tree._elements;
+    const elements = _Tree.GetElementsInRect(_WorldOriginX / _WorldScale, _WorldOriginY / _WorldScale, canvas.element.width / _WorldScale, canvas.element.height / _WorldScale);
     const selectedElements = [ ];
 
     canvas.save();
@@ -105,6 +122,11 @@ const _Draw = (canvas) => {
         canvas.stroke(255, 255, 255);
         canvas.rect(x, y, width, height, { "noFill": true });
     }
+    canvas.restore();
+
+    canvas.fill(255, 0, 0);
+    canvas.textSize(_MAX_FONT_SIZE);
+    canvas.text(`FPS: ${Math.floor(1 / dt)}; Drawn Elements: ${elements.length}/${_Tree._elements.length}`, 0, 0, { "alignment": { "horizontal": "left", "vertical": "top" } });
 };
 
 /**
@@ -125,13 +147,23 @@ window.addEventListener("load", async () => {
     _WorldOriginX = -window.innerWidth / 2;
     _WorldOriginY = -window.innerHeight / 2;
 
-    _Tree = new QuadTree(-960, -540, 1920, 1080, 2, 5);
+    _Tree = new QuadTree(-960, -540, 1920, 1080, 2, 10, [ _MovingCircle ]);
     console.log(_Tree);
 
     new wCanvas({
         // @ts-ignore
         "onDraw": _Draw
     });
+
+    for (let i = 0; i < 1e3; i++) {
+        const x = Math.random() * _Tree._width + _Tree._x;
+        const y = Math.random() * _Tree._height + _Tree._y;
+        _Tree.AddElement(new CircleTreeElement({ }, x, y, Math.max(1, Math.random() * 3)));
+    }
+
+    window["QuadTree"] = QTreeLib;
+    window["Tree"] = _Tree;
+    window["MovingCircle"] = _MovingCircle;
 });
 
 window.addEventListener("mousemove", ev => {
@@ -162,7 +194,7 @@ window.addEventListener("mousemove", ev => {
         const els = _Bench(() => _Tree.GetElementsInRect(x, y, width, height), "GetElementsInRect");
         if (els == null) return;
         _SelectedElements = { };
-        for (let i = 0; i < els.length; i++) _SelectedElements[els[i].id] = true
+        for (let i = 0; i < els.length; i++) _SelectedElements[els[i].id] = els[i];
     } else _Dragging = false;
 });
 
@@ -178,7 +210,7 @@ window.addEventListener("mouseup", ev => {
             const els = _Bench(() => _Tree.GetElementsAt(x, y), "GetElementsAt");
             if (els == null) return;
             _SelectedElements = { };
-            for (let i = 0; i < els.length; i++) _SelectedElements[els[i].id] = true;
+            for (let i = 0; i < els.length; i++) _SelectedElements[els[i].id] = els[i];
 
             return;
         }
@@ -219,14 +251,39 @@ window.addEventListener("mouseup", ev => {
 //     _WorldOriginY -= ev.movementY;
 // });
 
-window.addEventListener("wheel", ev => {
-    const newScale = _WorldScale + Math.sign(-ev.deltaY) * .1 * _WorldScale;
+const _Zoom = (dir) => {
+    const newScale = _WorldScale + dir * .1 * _WorldScale;
     if (newScale > 0) _WorldScale = newScale;
+};
+
+window.addEventListener("wheel", ev => _Zoom(Math.sign(-ev.deltaY)));
+
+
+window.addEventListener("keydown", ev => {
+    switch (ev.key) {
+    case "+":
+        _Zoom(1);
+        break;
+    case "-":
+        _Zoom(-1);
+        break;
+    }
 });
 
-window.addEventListener("keypress", ev => {
-    const n = Number.parseInt(ev.key);
-    if (!Number.isNaN(n)) _ElementType = n;
+window.addEventListener("keyup", ev => {
+    switch (ev.key) {
+    case "Backspace":
+        _Bench(() => {
+            for (const k of Object.keys(_SelectedElements))
+                _Tree.RemoveElement(_SelectedElements[k]);
+            _SelectedElements = { };
+        }, "RemoveElement");
+        break;
+    default: {
+        const n = Number.parseInt(ev.key);
+        if (!Number.isNaN(n)) _ElementType = n;
+    }
+    }
 });
 
 // window.addEventListener("resize", ev => {
