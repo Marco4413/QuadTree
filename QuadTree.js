@@ -216,17 +216,19 @@ export class QuadTree {
     GetChildren() { return this._children.slice(); }
 
     GetChildAt(x, y) {
-        if (!this.IsPointInBounds(x, y)) return null;
-
-        if (this.IsSplit()) {
-            for (let i = 0; i < this._children.length; i++) {
-                const child = this._children[i].GetChildAt(x, y);
-                if (child == null) continue;
-                return child;
-            }
+        /** @type {QuadTree[]} */
+        const treePool = [ this ];
+        while (treePool.length > 0) {
+            const tree = treePool.pop();
+            if (!tree.IsPointInBounds(x, y)) continue;
+    
+            if (tree.IsSplit()) {
+                treePool.push(...tree._children);
+            } else return tree;
         }
+        return null;
+    }
 
-        return this;
     }
 
     /**
@@ -260,21 +262,20 @@ export class QuadTree {
     /**
      * @param {Number} x
      * @param {Number} y
-     * @returns {AbstractTreeElement[]?}
+     * @returns {AbstractTreeElement[]}
      */
     GetElementsAt(x, y) {
-        if (!this.IsPointInBounds(x, y)) return null;
-
-        if (this.IsSplit()) {
-            for (let i = 0; i < this._children.length; i++) {
-                const child = this._children[i];
-                const childElements = child.GetElementsAt(x, y);
-                if (childElements == null) continue;
-                return childElements;
-            }
+        /** @type {QuadTree[]} */
+        const treePool = [ this ];
+        while (treePool.length > 0) {
+            const tree = treePool.pop();
+            if (tree._elements.length === 0 || !tree.IsPointInBounds(x, y)) continue;
+    
+            if (tree.IsSplit()) {
+                treePool.push(...tree._children);
+            } else return tree.GetElements();
         }
-
-        return this.GetElements();
+        return [ ];
     }
 
     /**
@@ -283,29 +284,28 @@ export class QuadTree {
      * @param {Number} width
      * @param {Number} height
      * @param {Boolean} filterDuplicates
-     * @returns {AbstractTreeElement[]?}
+     * @returns {AbstractTreeElement[]}
      */
     GetElementsInRect(x, y, width, height, filterDuplicates = true) {
-        if (!this.IsRectInBounds(x, y, width, height)) return null;
+        const elements = [ ];
 
-        if (this.IsSplit()) {
-            const elements = [ ];
-            for (let i = 0; i < this._children.length; i++) {
-                const child = this._children[i];
-                const childElements = child.GetElementsInRect(x, y, width, height, false);
-                if (childElements == null) continue;
-                elements.push(...childElements);
-            }
-
-            const seenElements = { };
-            return !filterDuplicates ? elements : elements.filter(el => {
-                if (seenElements[el.id]) return false;
-                seenElements[el.id] = true;
-                return true;
-            });
+        /** @type {QuadTree[]} */
+        const treePool = [ this ];
+        while (treePool.length > 0) {
+            const tree = treePool.pop();
+            if (tree._elements.length === 0 || !tree.IsRectInBounds(x, y, width, height)) continue;
+    
+            if (tree.IsSplit()) {
+                treePool.push(...tree._children);
+            } else elements.push(...tree._elements);
         }
 
-        return this.GetElements();
+        const seenElements = { };
+        return !filterDuplicates ? elements : elements.filter(el => {
+            if (seenElements[el.id]) return false;
+            seenElements[el.id] = true;
+            return true;
+        });
     }
 
     /**
